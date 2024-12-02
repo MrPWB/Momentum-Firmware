@@ -93,6 +93,7 @@ extern "C" int32_t co2_monitor_app(void* p) {
     UNUSED(p);
 
     CO2Monitor* co2_monitor = new CO2Monitor();
+    co2_monitor->data = SCD30Data(); // Initialize with default values (zeros)
 
     co2_monitor->csv = new CsvWriter(APP_DATA_PATH("co2.csv"));
 
