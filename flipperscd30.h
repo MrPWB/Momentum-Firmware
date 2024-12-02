@@ -7,13 +7,13 @@
 #include <vector>
 
 struct SCD30Data {
-    float co2_ppm;
-    float temperature;
-    float humidity;
+    float co2_ppm = 0;
+    float temperature = 0;
+    float humidity = 0;
 
     std::string ts;
 
-    bool result_valid;
+    bool result_valid = false;
 };
 
 class FlipperSCD30 {
