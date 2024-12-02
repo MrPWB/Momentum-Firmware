@@ -104,18 +104,15 @@ extern "C" int32_t co2_monitor_app(void* p) {
 
     gui_add_view_port(co2_monitor->gui, co2_monitor->view_port, GuiLayerFullscreen);
 
-    co2_monitor->gui = static_cast<Gui*>(furi_record_open("gui"));
-    co2_monitor->event_queue = furi_message_queue_alloc(8, sizeof(InputEvent));
-    gui_add_view_port(co2_monitor->gui, co2_monitor->view_port, GuiLayerFullscreen);
 
-    FlipperSCD30WorkerThread scd30_worker(5);
+    FlipperSCD30WorkerThread scd30_worker(2000); // 2 second interval
     scd30_worker.start();
 
     bool running = true;
     InputEvent event;
 
     while(running) {
-        FuriStatus status = furi_message_queue_get(co2_monitor->event_queue, &event, 100);
+        FuriStatus status = furi_message_queue_get(co2_monitor->event_queue, &event, 1000);
         if(status == FuriStatusOk) {
             if(event.type == InputTypePress && event.key == InputKeyBack) {
                 running = false;
