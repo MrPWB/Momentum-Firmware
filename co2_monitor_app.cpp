@@ -21,17 +21,22 @@ struct CO2Monitor {
     std::string last_data_ts;
 };
 
+static constexpr int CO2_MIN_LEVEL = 500;
+static constexpr int CO2_MAX_LEVEL = 2500;
+static constexpr int LED_MAX = 0xFF;
+
 static void update_led(int co2_level) {
     int r = 0;
     int g = 0;
 
-    if(co2_level < 500) {
-        g = 0xFF;
-    } else if(co2_level > 2500) {
-        r = 0xFF;
+    if(co2_level < CO2_MIN_LEVEL) {
+        g = LED_MAX;
+    } else if(co2_level > CO2_MAX_LEVEL) {
+        r = LED_MAX;
     } else {
-        r = ((co2_level - 500.0) / 2000.0) * 0xFF;
-        g = 0xFF - r;
+        // Integer math: multiply first, then divide to maintain precision
+        r = ((co2_level - CO2_MIN_LEVEL) * LED_MAX) / (CO2_MAX_LEVEL - CO2_MIN_LEVEL);
+        g = LED_MAX - r;
     }
 
     furi_hal_light_set(LightRed, r);
@@ -40,13 +45,14 @@ static void update_led(int co2_level) {
 }
 
 static void progress_bar(Canvas* canvas, int x, int y, int w, int progress, int max) {
-    if(progress < 0) {
-        progress = 0;
-    } else if(progress > max) {
-        progress = max;
-    }
+    // Clamp progress between 0 and max
+    progress = (progress < 0) ? 0 : (progress > max) ? max : progress;
+    
+    // Integer math: multiply first, then divide to maintain precision
+    const int bar_width = ((w - 4) * progress) / max;
+    
     canvas_draw_rframe(canvas, x, y, w, 7, 2);
-    canvas_draw_rbox(canvas, x + 2, y + 2, (progress / static_cast<double>(max)) * (w - 4), 3, 0);
+    canvas_draw_rbox(canvas, x + 2, y + 2, bar_width, 3, 0);
 }
 
 static void draw_callback(Canvas* canvas, void* ctx) {
@@ -73,13 +79,15 @@ static void draw_callback(Canvas* canvas, void* ctx) {
 
     // Temp / humidity
     canvas_set_font(canvas, FontSecondary);
+    char temp_hum_str[64];
+    snprintf(temp_hum_str, sizeof(temp_hum_str), "%d C, %d %% - Hold UP to calib.", temp, hum);
     canvas_draw_str_aligned(
         canvas,
         5,
         55,
         AlignLeft,
         AlignTop,
-        (std::to_string(temp) + " C, " + std::to_string(hum) + " % - Hold UP to calib.").c_str());
+        temp_hum_str);
 
     // Info
 }
