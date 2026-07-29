@@ -77,11 +77,22 @@ static void draw_callback(Canvas* canvas, void* ctx) {
     canvas_draw_str_aligned(canvas, center, 22, AlignCenter, AlignTop, "ppm CO2");
     progress_bar(canvas, 10, 35, width - 20, co2, 3000);
 
-    // Temp / humidity
+    // Temp / humidity / pressure
     canvas_set_font(canvas, FontSecondary);
-    char temp_hum_str[64];
-    snprintf(temp_hum_str, sizeof(temp_hum_str), "%d C, %d %% - Hold UP to calib.", temp, hum);
-    canvas_draw_str_aligned(canvas, 5, 55, AlignLeft, AlignTop, temp_hum_str);
+    char status_str[64];
+    if(context->data.pressure_valid) {
+        // Only one line fits, so the pressure replaces the calibration hint
+        snprintf(
+            status_str,
+            sizeof(status_str),
+            "%d C, %d %%, %d hPa",
+            temp,
+            hum,
+            static_cast<int>(context->data.pressure_mbar));
+    } else {
+        snprintf(status_str, sizeof(status_str), "%d C, %d %% - Hold UP to calib.", temp, hum);
+    }
+    canvas_draw_str_aligned(canvas, 5, 55, AlignLeft, AlignTop, status_str);
 
     // Info
 }
@@ -136,6 +147,9 @@ extern "C" int32_t co2_monitor_app(void* p) {
                     std::to_string(new_data.co2_ppm),
                     std::to_string(new_data.temperature),
                     std::to_string(new_data.humidity),
+                    new_data.pressure_valid ?
+                        std::to_string(static_cast<int>(new_data.pressure_mbar)) :
+                        "",
                 });
             }
         }

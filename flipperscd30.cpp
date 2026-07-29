@@ -52,8 +52,12 @@ bool FlipperSCD30::send_command(std::vector<uint8_t> cmd, std::vector<uint8_t> d
     return send_command(cmd);
 }
 
-bool FlipperSCD30::start_measurement() {
-    return send_command({0x00, 0x10});
+bool FlipperSCD30::start_measurement(uint16_t pressure_mbar) {
+    return send_command({0x00, 0x10}, {UINT16_MSBS(pressure_mbar), UINT16_LSBS(pressure_mbar)});
+}
+
+bool FlipperSCD30::set_ambient_pressure(uint16_t pressure_mbar) {
+    return start_measurement(pressure_mbar);
 }
 
 bool FlipperSCD30::set_interval(uint16_t interval) {
@@ -86,17 +90,82 @@ SCD30Data FlipperSCD30::read_measurements() {
     return result;
 }
 
+// How often the BME280 is polled
+static const uint32_t BME280_READ_INTERVAL_MS = 30000;
+// The SCD30 stores its measurement mode in non volatile memory, so resending
+// 0x0010 is rate limited to avoid needless writes
+static const uint32_t PRESSURE_MIN_INTERVAL_MS = 60000;
+static const int32_t PRESSURE_THRESHOLD_MBAR = 1;
+
+// Reads the BME280 and pushes the value to the SCD30 if it moved far enough
+static void update_ambient_pressure(FlipperSCD30WorkerThread* worker_context) {
+    if(!worker_context->bme280_present) {
+        return;
+    }
+
+    uint32_t now = furi_get_tick();
+    if(now - worker_context->last_bme280_read_tick < furi_ms_to_ticks(BME280_READ_INTERVAL_MS)) {
+        return;
+    }
+    worker_context->last_bme280_read_tick = now;
+
+    uint16_t pressure;
+    if(!worker_context->bme280.read_pressure_mbar(&pressure)) {
+        return;
+    }
+    worker_context->last_pressure_mbar = pressure;
+
+    int32_t delta =
+        static_cast<int32_t>(pressure) - static_cast<int32_t>(worker_context->last_sent_pressure);
+    if(delta < 0) {
+        delta = -delta;
+    }
+
+    if(delta < PRESSURE_THRESHOLD_MBAR || now - worker_context->last_pressure_sent_tick <
+                                              furi_ms_to_ticks(PRESSURE_MIN_INTERVAL_MS)) {
+        return;
+    }
+
+    if(worker_context->scd30.set_ambient_pressure(pressure)) {
+        worker_context->last_sent_pressure = pressure;
+        worker_context->last_pressure_sent_tick = now;
+    }
+}
+
 static int32_t run(void* context) {
     FlipperSCD30WorkerThread* worker_context =
         reinterpret_cast<FlipperSCD30WorkerThread*>(context);
 
-    worker_context->scd30.start_measurement();
-    worker_context->scd30.set_interval(worker_context->interval);
+    // An optional BME280 on the same bus provides the ambient pressure the
+    // SCD30 needs to compensate its CO2 reading. Without one we start the
+    // measurement with 0, which disables the compensation.
+    worker_context->bme280_present = worker_context->bme280.init();
+
+    uint16_t pressure = 0;
+    if(worker_context->bme280_present && worker_context->bme280.read_pressure_mbar(&pressure)) {
+        worker_context->last_pressure_mbar = pressure;
+    } else {
+        pressure = 0;
+    }
+
+    worker_context->scd30.start_measurement(pressure);
+    // Command 0x4600 takes seconds (valid range 2..1800), not milliseconds
+    worker_context->scd30.set_interval(worker_context->interval / 1000);
+
+    worker_context->last_sent_pressure = pressure;
+    worker_context->last_bme280_read_tick = furi_get_tick();
+    worker_context->last_pressure_sent_tick = worker_context->last_bme280_read_tick;
 
     while(worker_context->running) {
         SCD30Data data = worker_context->scd30.read_measurements();
 
+        update_ambient_pressure(worker_context);
+
         if(data.result_valid && data.co2_ppm > 0) {
+            data.pressure_mbar = worker_context->last_pressure_mbar;
+            data.pressure_valid = worker_context->bme280_present &&
+                                  worker_context->last_pressure_mbar != 0;
+
             worker_context->last_data = data;
             worker_context->data_available = true;
         }
@@ -116,7 +185,7 @@ FlipperSCD30WorkerThread::FlipperSCD30WorkerThread(int interval)
     : interval(interval) {
     thread = furi_thread_alloc();
     furi_thread_set_name(thread, "SensorWorker");
-    furi_thread_set_stack_size(thread, 2048);
+    furi_thread_set_stack_size(thread, 3072);
     furi_thread_set_context(thread, this);
     furi_thread_set_callback(thread, run);
 }
