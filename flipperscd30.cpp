@@ -75,7 +75,7 @@ SCD30Data FlipperSCD30::read_measurements() {
         result.temperature = buffer_to_float(buffer, 6);
         result.humidity = buffer_to_float(buffer, 12);
 
-        FuriHalRtcDateTime datetime;
+        DateTime datetime;
         furi_hal_rtc_get_datetime(&datetime);
 
         result.ts = std::to_string(datetime.year) + "-" + std::to_string(datetime.month) + "-" +
