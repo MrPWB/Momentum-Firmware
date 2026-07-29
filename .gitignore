@@ -6,3 +6,4 @@ dist/*
 .env
 .ufbt
 .aider*
+aider_env.env
